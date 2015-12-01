@@ -1,572 +1,382 @@
 
-var api = require('./api.js')
-  , db = require('./db.js')
-  , winston = require('winston')
+var EventEmitter = require('events').EventEmitter
+  , groove = require('groove')
+  , Promise = require('promise')
   , util = require('util')
+  , winston = require('winston')
+  , api = require('./api.js')
+  , config	= require('./config.js')
+  , db = require('./db.js')
   , library = require('./library.js')
-  , EventEmitter = require('events').EventEmitter
-  , _channel = false
-  , _library = []
-  , _channels = []
-  , _playlist = []
-  , _userInsertions = []
-  , _playlistLength = 10;
+  , pouch = require('./pouch.js');
 
-module.exports = new EventEmitter();
+util.inherits(Player, EventEmitter);
+module.exports = Player;
 
-// Our Public methods------------------------
+function Player(name){
 
-module.exports.channels = function()
-{
-	return _channels;
-}
+	var _this = this;
 
-module.exports.channel = function()
-{
-	return (_channel === false) ? false : _channel.id;
-}
+	_this.name = name || false;
+	// _this.playlist = groove.createPlaylist();
+	// _this.normalizer = groove.createLoudnessDetector();
+	_this.playlist = [];
+	_this.history = [];
+	_this.userInsertions = [];
+	_this.playlistLength = 10;
+	_this.indexName = _this.name ? 'playOrder-'+_this.name : 'playOrder';
 
-module.exports.setChannels = function(channels)
-{
-	_channels = channels;
-}
+	if(_this.name) playlists.push(name);
+	players.push(_this);
 
-module.exports.playlist = function()
-{
-	var playlist = library.simplified(_playlist);
-
-	// Mark all songs that are user inserted as such
-	for (var i = _userInsertions.length - 1; i >= 0; i--) {
-		var insertion = _userInsertions[i],
-			found = false;
-
-		playlist.forEach(function(song){
-			if(song.id == insertion.id){
-				found = true;
-				song.userInserted = insertion.user;
-				return;
-			}
+	// Public methods------------------------
+	_this.setup = function()
+	{
+		return setupIndexes().then(function(){
+			winston.info('Indexes created successfully');
+			return buildPlaylist();
+		}).then(function(){
+			return startTrack();
 		});
-
-		// Remove our reference if the song is no longer in the playlist
-		if(!found) _userInsertions.splice(i,1);
 	}
 
-
-	return playlist;
-}
-
-module.exports.library = function()
-{
-	return library.simplified(_library);
-}
-
-module.exports.setLibrary = function(library,callback)
-{
-	_library = library;
-
-	parseLibrary(function(){
-		buildPlaylist(function(){
-			startTrack();
-			callback();
-		});
-	});
-}
-
-module.exports.skipTrack = function(user)
-{
-	if(user.level <= 0){
-		winston.info(user.username + ' denied skip');
-		module.exports.emit('statusUpdate','userDenied',{
-			user:user,
-			message:"User level does not permit skipping."
-		});
-		return;
+	_this.getPlaylist = function()
+	{
+		return {
+			playlist:_this.playlist,
+			history:_this.history,
+			userInsertions: _this.userInsertions
+		};
 	}
 
-	var song = library.simplified(_playlist[0])[0];
-	nextTrack();
-	module.exports.emit('statusUpdate','userSkipped',{
-		user:user.username,
-		song:song
-	});
-
-	winston.info(user.username + ' skipped [' + song.title + ' by ' + song.artist + ']');
-}
-
-module.exports.moveTracks = function(user,index,ids)
-{
-	if(user.level <= 0){
-		winston.info(user.username + ' denied movement');
-		module.exports.emit('statusUpdate','userDenied',{
-			user:user,
-			message:"User level does not permit movement."
-		});
-		return;
+	_this.emit = function(event,action,params)
+	{
+		params.action = action;
+		params.playerID = _this.name;
+		EventEmitter.prototype.emit.call(this,'statusUpdate','playerUpdate',params);
 	}
 
-	insertTracks(index,ids);
-	module.exports.emit('statusUpdate','userMoved',{
-		user:user.username,
-		ids:ids
-	});
+	_this.skipTrack = function(user)
+	{
+		if(!_this.authUser(user,'user','skipping')) return Promise.reject(new Error('Unable to authenticate user.'));
 
-	winston.info(user.username + ' moved [' + ids + ']');
-}
+		var skipped = _this.playlist[0]
+			current = _this.playlist[1];
 
-module.exports.insertTracks = function(user,index,ids)
-{
-	// TODO: Limit rate of insertion
-	if(user.level <= 0){
-		winston.info(user.username + ' denied insertion');
-		module.exports.emit('statusUpdate','userDenied',{
-			user:user,
-			message:"User level does not permit insertions."
+		_this.emit('statusUpdate','userSkipped',{
+			user:user.name,
+			song:skipped
 		});
-		return;
+
+		winston.info(user.name + ' skipped [' + skipped + ']');
+
+		return nextTrack()
+			.then(function(){
+				return library.getSong(current);
+			})
+			.then(function(song){
+				current = song;
+				return library.getSong(skipped);
+			})
+			.then(function(song){
+				skipped = song;
+
+				return Promise.resolve({current:current,skipped:skipped});
+			});
 	}
 
-	// Store reference to what user inserted these tracks
-	ids.forEach(function(id){
-		_userInsertions.push({id:id,user:user});
-	});
+	_this.moveTracks = function(user,index,ids)
+	{
+		if(!_this.authUser(user,'user','movement')) return;
 
-	insertTracks(index,ids);
-	module.exports.emit('statusUpdate','userInserted',{
-		user:user.username,
-		ids:ids
-	});
+		insertTracks(index,ids);
 
-	winston.info(user.username + ' inserted [' + ids + ']');
-}
-
-module.exports.removeTracks = function(user,ids)
-{
-	if(user.level <= 0){
-		winston.info(user.username + ' denied remove');
-		module.exports.emit('statusUpdate','userDenied',{
-			user:user,
-			message:"User level does not permit removing tracks."
+		_this.emit('statusUpdate','userMoved',{
+			user:user.name,
+			ids:ids
 		});
-		return;
+
+		winston.info(user.name + ' moved [' + ids + ']');
 	}
 
-	removeTracks(ids);
-	module.exports.emit('statusUpdate','userRemoved',{
-		user:user.username,
-		ids:ids
-	});
+	_this.insertTracks = function(user,index,ids)
+	{
+		if(!_this.authUser(user,'user','insertion')) return;
 
-	winston.info(user.username + ' removed [' + ids + ']');
-}
-
-module.exports.deleteSongs = function(user,ids)
-{
-	if(user.level <= 1){
-		winston.info(user.username + ' denied delete');
-		module.exports.emit('statusUpdate','userDenied',{
-			user:user,
-			message:"User level does not permit deleting tracks."
+		// Store reference to what user inserted these tracks
+		ids.forEach(function(id){
+			userInsertions.push({id:id,user:user});
 		});
-		return;
-	}
-	
-	removeTracks(ids);
-	deleteSongs(ids);
-	module.exports.emit('statusUpdate','userDeleted',{
-		user:user.username,
-		ids:ids
-	});
 
-	winston.info(user.username + ' deleted [' + ids + ']');
-}
+		insertTracks(index,ids);
 
-module.exports.rateTrack = function(user,id,newRating)
-{
-	if(user.level <= 0){
-		winston.info(user.username + ' denied rate');
-		module.exports.emit('statusUpdate','userDenied',{
-			user:user,
-			message:"User level does not permit rating tracks."
+		_this.emit('statusUpdate','userInserted',{
+			user:user.name,
+			ids:ids
 		});
-		return;
+
+		winston.info(user.name + ' inserted [' + ids + ']');
 	}
 
-	var song;
-	for (var i = _library.length - 1; i >= 0; i--) {
-		song = _library[i];
-		if(song.id == id) break;
-	};
+	_this.removeTracks = function(user,ids)
+	{
+		if(!_this.authUser(user,'user','remove')) return;
 
-	db.Rating.findOrCreate({SongId:song.id,UserId:user.id}).success(function(rating){
-		rating.rating = newRating;
-		rating.save(['rating']).success(function(){
-			db.Rating.all({where:{SongId:song.id}}).success(function(ratings){
-				song.ratings = ratings;
-				library.parseSong(song,function(){
-					module.exports.emit('statusUpdate','ratingUpdate',{
-						id:song.id,
-						rating:song.rating,
-						userRating:newRating,
-						user:user.username
-					});
+		return _this.removeTracks(ids)
+			.then(function(){
+				winston.info(user.name + ' removed [' + ids + ']');
+				_this.emit('statusUpdate','userRemoved',{
+					user:user.name,
+					ids:ids
 				});
 			});
-		});
-	});
-
-	winston.info(user.username + ' rated [' + song.id + '] a [' + newRating + ']');
-}
-
-module.exports.addChannel = function(user,name)
-{
-	if(user.level <= 0){
-		winston.info(user.username + ' denied channel add');
-		module.exports.emit('statusUpdate','userDenied',{
-			user:user,
-			message:"User level does not permit adding a channel."
-		});
-		return;
-	}
-	
-	addChannel(name);
-	module.exports.emit('statusUpdate','userAddedChannel',{
-		user:user.username,
-		name:module.name
-	});
-}
-
-module.exports.setChannel = function(user,id)
-{
-	if(user.level <= 0){
-		winston.info(user.username + ' denied channel set');
-		module.exports.emit('statusUpdate','userDenied',{
-			user:user,
-			message:"User level does not permit setting channel."
-		});
-		return;
-	}
-	
-	setChannel(id);
-	module.exports.emit('statusUpdate','userChangedChannel',{
-		user:user.username,
-		id:id
-	});
-}
-
-// Our Internal methods------------------------
-
-var parseLibrary = function(callback)
-{
-	// Sort by artist, album, and track
-	var trackRegex = /[^\d].*$/;
-	_library.sort(function(a,b){
-		if(a.id3.comments.artist[0] == b.id3.comments.artist[0]){
-			if(a.id3.comments.album[0] == b.id3.comments.album[0]){
-				if(a.id3.comments.track_number == null && b.id3.comments.track_number == null){
-					if(a.id3.comments.title[0]<b.id3.comments.title[0]) return -1;
-					if(a.id3.comments.title[0]>b.id3.comments.title[0]) return 1;
-					return 0;
-				}else{
-					if(a.id3.comments.track_number == null) return -1;
-					if(b.id3.comments.track_number == null) return 1;
-					return parseInt(a.id3.comments.track_number[0].replace(trackRegex,''))
-						- parseInt(b.id3.comments.track_number[0].replace(trackRegex,''));
-				}
-			}else{
-				if(a.id3.comments.album[0]<b.id3.comments.album[0]) return -1;
-				if(a.id3.comments.album[0]>b.id3.comments.album[0]) return 1;
-				return 0;
-			}
-		}else{
-			if(a.id3.comments.artist[0]<b.id3.comments.artist[0]) return -1;
-			if(a.id3.comments.artist[0]>b.id3.comments.artist[0]) return 1;
-			return 0;
-		}
-	});
-
-	// If you need to check the sort
-	// for (var i = 0; i < _library.length; i++) {
-	// 	var song =_library[i];
-	// 	var trackNumber = (song.id3.comments.track_number == null) ? '?' : song.id3.comments.track_number[0].replace(trackRegex,'');
-	// 	console.log(song.id3.comments.artist + ' / ' + song.id3.comments.album + ' / ' + trackNumber + ' / ' + song.id3.comments.title);
-	// };
-
-	callback();
-}
-
-var channelLibrary = function()
-{
-	if(!_channel) return _library.slice();
-
-	// Sort out by channel
-	var channelLibrary = [];
-	_library.forEach(function(song){
-		if(song.channels != null){
-			for (var i = song.channels.length - 1; i >= 0; i--) {
-				var channel = song.channels[i];
-				if(channel.name == _channel.name){
-					channelLibrary.push(song);
-					break;
-				}
-			};
-		}
-	});
-
-	return channelLibrary;
-}
-
-var buildPlaylist = function(callback)
-{
-	var channel = channelLibrary();
-
-	// Remove current playlist from channel
-	_playlist.forEach(function(song){
-		channel.splice(channel.indexOf(song),1);
-	});
-
-	// Get our newest and oldest date
-	var newest, oldest;
-	channel.forEach(function(song){
-		if(song.lastPlayed != null && newest == null){ newest = oldest = song.lastPlayed; return;}
-		if(song.lastPlayed != null && song.lastPlayed > newest) newest = song.lastPlayed;
-		if(song.lastPlayed != null && song.lastPlayed < oldest) oldest = song.lastPlayed;
-	});
-
-	if(newest != null && oldest != null){
-		// We'll use this range to sort influenced by rating
-		var range = newest.getTime() - oldest.getTime();
-
-		var influencedDate = function(song){
-			var influence = 0,
-				lastPlayed = song.lastPlayed
-				rating = song.rating;
-
-			if(lastPlayed == null) lastPlayed = oldest; // Never played has the best chances, right?
-
-			if(rating > 3) influence = (rating - 3) /  2 / 6; 		// Make it up to 1/6'th a range higher
-			if(rating < 3) influence = (3 - rating) / -2;	// Make it up to 1 range lower
-			return new Date(lastPlayed.getTime() - Math.round(range * influence));
-		}
-
-		// Sort by date
-		channel.sort(function(a,b){
-			return influencedDate(a).getTime() - influencedDate(b).getTime();
-		});
-
-		//If you need to check the sort
-		// winston.info(newest);
-		// winston.info(oldest);
-		// winston.info(range);
-		// for (var i = 0; i < channel.length; i++) {
-		// 	var song =channel[i];
-		// 	winston.info(influencedDate(song).toISOString() + ' / ' + song.rating);
-		// };
-
 	}
 
-	while(_playlist.length < _playlistLength && channel.length > 0){
-		var random = Math.floor(Math.random()*channel.length*.5) // From first half of array, to keep it from repeating too much
-		  , song = channel.splice(random,1)[0];
+	_this.deleteSongs = function(user,ids)
+	{
+		if(!_this.authUser(user,'admin','delete')) return;
 
-		// winston.info('Pulled song ['+random+'] from list of ['+channel.length+']')
-
-		_playlist.push(song);
-	}
-
-	winston.info('Playlist updated');
-	if(callback) callback();
-}
-
-var trackTimeout;
-var startTrack = function()
-{
-	clearTimeout(trackTimeout);
-	if(_playlist.length == 0) return;
-	
-	var song = _playlist[0];
-
-	var duration = song.id3.playtime_seconds * 1000;
-	var attributes = [];
-
-	song.lastPlayed = new Date();
-	song.save(['lastPlayed']);
-
-	trackTimeout = setTimeout(function(){
-		nextTrack();
-	},duration);
-
-	winston.info('Starting new track ['+song.url+']');
-	module.exports.emit('statusUpdate','startTrack',{
-		song:library.simplified(song)[0]
-	});
-}
-
-var nextTrack = function()
-{
-	var song = _playlist.splice(0,1)[0];
-	_library.splice(_library.indexOf(song),1);
-	_library.push(song);
-
-	buildPlaylist();
-	startTrack();
-
-	module.exports.emit('statusUpdate','playlistUpdate',{
-		playlist:module.exports.playlist(),
-		channel:module.exports.channel()
-	});
-}
-
-var insertTracks = function(index,ids)
-{
-	//Find our selected tracks
-	var songs = [];
-	_library.forEach(function(song){
-		if(ids.indexOf(song.id) !== -1){
-			songs.push(song);
-		}
-	});
-
-	//Insert into channel, if not 'all'
-	if(_channel){
-		songs.forEach(function(song){
-			if(song.channels){
-				for (var i = song.channels.length - 1; i >= 0; i--) {
-					if(song.channels[i].name == _channel.name) return;
-				};
-
-				song.channels.push(_channel);
-				song.setChannels(song.channels);
-			}
-		});
-	}
-
-	//Make sure these tracks aren't in the playlist, no repeats, people
-	var removedFirst = false;
-	songs.forEach(function(song){
-		var playlistIndex = _playlist.indexOf(song);
-		if(playlistIndex !== -1) _playlist.splice(playlistIndex,1);
-		if(playlistIndex == 0) removedFirst = true;
-	});
-
-	//Insert our songs
-	while(songs.length > 0)
-		_playlist.splice(index,0,songs.pop());
-
-	// We could have removed the first track by adding it lower in the list
-	if(removedFirst) startTrack();
-
-	module.exports.emit('statusUpdate','playlistUpdate',{
-		playlist:module.exports.playlist(),
-		channel:module.exports.channel()
-	});
-}
-
-var removeTracks = function(ids){
-	var songs = [];
-	for (var i = _playlist.length - 1; i >= 0; i--) {
-		var song = _playlist[i],
-			index = ids.indexOf(song.id);
-		if(index !== -1) songs.push(_playlist.splice(i,1)[0]);
-	};
-
-	//Remove from channel, if not 'all'
-	if(_channel){
-		songs.forEach(function(song){
-			if(song.channels){
-				for (var i = song.channels.length - 1; i >= 0; i--) {
-					if(song.channels[i].name == _channel.name){
-						song.channels.splice(i,1);
-						song.setChannels(song.channels);
-						return;
-					}
-				};
-			}
-		});
-	}
-
-	buildPlaylist();
-
-	module.exports.emit('statusUpdate','playlistUpdate',{
-		playlist:module.exports.playlist(),
-		channel:module.exports.channel()
-	});
-}
-
-var deleteSongs = function(ids){
-	var songs = [];
-	for (var i = _library.length - 1; i >= 0; i--) {
-		var song = _library[i],
-			index = ids.indexOf(song.id);
-		if(index !== -1) songs.push(_library.splice(i,1)[0]);
-	};
-
-	// Delete from database
-	songs.forEach(function(song){
-		song.destroy();
-	});
-}
-
-var addChannel = function(channelName){
-	if(channelName == '') return;
-	db.Channel.findOrCreate({name:channelName}).success(function(channel){
-		db.Channel.findAll().success(function(channels){
-			_channels = channels;
-
-			module.exports.emit('statusUpdate','channelsUpdate',{
-				channels:module.exports.channels()
+		return _this.removeTracks(ids)
+			.then(function(){
+				return library.deleteSongs(ids);
+			})
+			.then(function(){
+				winston.info(user.name + ' deleted [' + ids + ']');
+				_this.emit('statusUpdate','userDeleted',{
+					user:user.name,
+					ids:ids
+				});
 			});
+	}
+
+	_this.rateTrack = function(user,id,rating)
+	{
+		if(!_this.authUser(user,'user','rate')) return Promise.reject(new Error('Unable to authenticate user.'));
+
+		return library.getSong(id)
+			.then(function(song){
+				return song.addRating(user.id,rating);
+			})
+			.then(function(song){
+				return song.save();
+			})
+			.then(function(song){
+				winston.info(user.name + ' rated [' + id + '] a [' + rating + ']');
+				_this.emit('statusUpdate','ratingUpdate',{
+					id:song.id,
+					rating:song.rating,
+					userRating:rating,
+					user:user.name
+				});
+
+				return Promise.resolve(song);
+			});
+	}
+
+	_this.authUser = function(user,required,action)
+	{
+		if(!user.roles || (user.roles.indexOf(required) === -1  && user.roles.indexOf('admin') === -1)){
+			winston.info(util.inspect(user));
+			winston.info(user.roles);
+			winston.info(user.roles.indexOf('admin'));
+			winston.info('was denied ' + action);
+			_this.emit('statusUpdate','userDenied',{
+				user:user,
+				message:'User level does not permit '+action+'.'
+			});
+			return false;
+		}
+
+		return true;
+	}
+
+	_this.scrubUserInsertions = function()
+	{
+		// Remove our reference if the song is no longer in the playlist or history
+		_this.userInsertions.forEach(function(id,index,insertions){
+			if(_this.playlist.indexOf(id.id) == -1 && _this.history.indexOf(id.id) == -1)
+				insertions.splice(index,1);
 		});
-	});
-}
+	}
 
-var addSong = function(song)
-{
-	// Check to make sure this isn't a duplicate
-	for (var i = _library.length - 1; i >= 0; i--) {
-		if(_library[i].id == song.id) return;
-	};
+	var trackHistory = function(id)
+	{
+		_this.history.push(id);
+		while(_this.history.length > 10)
+			_this.history.shift();
+	}
 
-	// Add to library, and sort
-	_library.push(song);
-	parseLibrary(function(){
-		module.exports.emit('statusUpdate','songAdded',{
-			song:library.simplified(song)[0]
+	// Our Internal methods------------------------
+
+	var setupIndexes = function()
+	{
+		return pouch
+			.setupIndex(pouch.songs,'dateOrdered',function(doc){
+				if(doc.lastPlayed)
+					emit(new Date(doc.lastPlayed).getTime());
+			},config.validate)
+			.then(function(){
+				var start,end;
+
+				return pouch.songs
+					.query('dateOrdered',{limit:1}).then(function(result){
+						if(result.rows.length > 0) start = new Date(result.rows[0].key);
+						return pouch.songs.query('dateOrdered',{limit:1,descending:true});
+					})
+					.then(function(result){
+						if(result.rows.length > 0) end = new Date(result.rows[0].key);
+
+						if(!start){
+							start = new Date();
+							start.setMonth(start.getMonth() - 1);
+						}
+						if(!end) end = new Date();
+
+						var range = end.getTime() - start.getTime();
+						
+						// Make it up to 1/6 a range higher
+						// Make it up to 1 range lower
+						// Add random fluctuation of up to 1/6 
+						var index = 'function(doc){\
+							if(doc.filename {{filter}}){\
+								var influence = 0,\
+									lastPlayed = (doc.lastPlayed) ? new Date(doc.lastPlayed).getTime() : ' + start.getTime() + ';\
+								if(doc.rating > 3) influence = (doc.rating - 3) /	2 / 6;\
+								if(doc.rating < 3) influence = (3 - doc.rating) / -2;\
+								influence += Math.random() / 6;\
+								emit(lastPlayed - Math.round(' + range + ' * influence));\
+							}\
+						}';
+
+						index = index.replace('{{filter}}',_this.name ? ' && doc.playlists && doc.playlists.indexOf('+_this.name+') !== -1' : '');
+						
+						return pouch.setupIndex(pouch.songs,_this.indexName,index,config.validate);
+					});
+			});
+	}
+
+	var buildPlaylist = function(callback)
+	{
+		return pouch.songs.query(_this.indexName,{limit:_this.playlistLength})
+			.then(function(result){
+				result.rows.forEach(function(song,index,songs){
+					if(_this.playlist.length < _this.playlistLength && _this.playlist.indexOf(song.id) == -1)
+						_this.playlist.push(song.id);
+				});
+				return Promise.resolve();
+			});
+	}
+
+	var trackTimeout;
+	var startTrack = function()
+	{
+		clearTimeout(trackTimeout);
+		if(_this.playlist.length == 0) return;
+		
+		return library.getSong(_this.playlist[0])
+			.then(function(song){
+				var duration = song.length * 1000;
+
+				trackTimeout = setTimeout(function(){
+					nextTrack();
+				},duration);
+
+				winston.info('Starting new track ['+song.url+']');
+				_this.emit('statusUpdate','startTrack',{
+					song:song.id
+				});
+				
+				song.lastPlayed = new Date();
+				return song.save();
+			});
+	}
+
+	var nextTrack = function()
+	{
+		trackHistory(_this.playlist.shift());
+
+		return buildPlaylist()
+			.then(function(){
+				return startTrack();
+			})
+			.then(function(){
+				_this.emit('statusUpdate','playlistUpdate',{
+					playlist:_this.playlist
+				});
+			});
+	}
+
+	var insertTracks = function(index,ids)
+	{
+		//Make sure these tracks aren't in the playlist, no repeats, people
+		var wasPlaying = false;
+		ids.forEach(function(song){
+			var playlistIndex = playlist.indexOf(song);
+			if(playlistIndex !== -1) playlist.splice(playlistIndex,1);
+			if(playlistIndex == 0) wasPlaying = true;
 		});
-	});
-}
 
-var setChannel = function(channelID){
-	winston.info('Setting channel by ID['+channelID+']');
-	if(_channel && _channel.id == channelID) return;
+		//Insert our songs
+		while(ids.length > 0)
+			playlist.splice(index,0,ids.pop());
 
-	if(channelID == '' || channelID == false){
-		_channel = false;
-		_playlist = [];
+		// We could have removed the first track by adding it lower in the list
+		if(wasPlaying) startTrack();
+
+		_this.emit('statusUpdate','playlistUpdate',{
+			playlist:_this.playlist
+		});
+	}
+
+	var removeTracks = function(ids){
+		for (var i = playlist.length - 1; i >= 0; i--) {
+			var song = playlist[i],
+				index = ids.indexOf(song);
+			if(index !== -1) playlist.splice(i,1);
+		};
+
 		buildPlaylist();
-		startTrack();
 
-		module.exports.emit('statusUpdate','playlistUpdate',{
-			playlist:module.exports.playlist(),
-			channel:module.exports.channel()
-		});
-	}else{
-		db.Channel.find({where:{id:channelID}}).success(function(channel){
-			_channel = channel;
-			_playlist = [];
-			buildPlaylist();
-			startTrack();
-
-			winston.info('Set channel to ['+channel.name+']');
-
-			module.exports.emit('statusUpdate','playlistUpdate',{
-				playlist:module.exports.playlist(),
-				channel:module.exports.channel()
-			});
+		_this.emit('statusUpdate','playlistUpdate',{
+			playlist:_this.playlist
 		});
 	}
+
+	// var setupNormalization = function(){
+
+	// 	_this.normalizer.on('info', function() {
+	// 		var info = _this.normalizer.getInfo();
+	// 		if (info.item) {
+	// 			if(config.verbose)
+	// 				console.log(info.item.file.filename, "gain:",
+	// 					groove.loudnessToReplayGain(info.loudness), "peak:", info.peak,
+	// 					"duration:", info.duration);
+	// 		} else {
+	// 			if(config.verbose)
+	// 				console.log("all files gain:",
+	// 					groove.loudnessToReplayGain(info.loudness), "peak:", info.peak,
+	// 					"duration:", info.duration);
+	// 		}
+	// 	});
+
+	// 	return new Promise(function(resolve,reject){
+	// 		_this.normalizer.attach(playlist, function(error) {
+	// 			if(error) return reject(error);
+	// 			resolve();
+	// 		});
+	// 	});
+	// }
 }
 
-library.on('songAdded',function(song){
-	addSong(song);
-});
+var playlists = [];
+var players = [];
+
+Player.playlists = function(){
+	return playlists;
+}
+Player.players = function(){
+	return players;
+}
+Player.defaultPlayer = function(){
+	return players[0];
+}

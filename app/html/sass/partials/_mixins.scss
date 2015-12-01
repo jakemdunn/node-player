@@ -1,0 +1,7 @@
+
+@function em($pixels, $context: $browser-context) {
+	@if($pixels <= $context){ // Can't go smaller than the context, won't work well on mobile
+		@return 1em;
+	}
+	@return $pixels/$context * 1em;
+}

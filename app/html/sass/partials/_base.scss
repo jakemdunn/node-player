@@ -2,8 +2,6 @@
 
 // base
 $base-font-family: unquote("MuseoSansW01-Rounded500"), unquote("sans-serif");
-$base-font-size: 13px;
-$base-line-height: 1.231;
 $font-color: #222;
 
 $dark-grey:#262626;
@@ -11,6 +9,7 @@ $light-grey:#EAE9E2;
 $green: #0dc76f;
 $red: #E5012D;
 $blue: #519ADF;
+$purple: #934499;
 
 // Links
 $link-color: #E5012D;
@@ -24,22 +23,5 @@ $list-left-margin: 40px;
 $selected-background-color: #000;
 $selected-font-color: #FFF;
 
-// keyframes mixin
-@mixin keyframes($name) {
-  @-webkit-keyframes #{$name} {
-    @content; 
-  }
-  @-moz-keyframes #{$name} {
-    @content;
-  }
-  @-ms-keyframes #{$name} {
-    @content;
-  }
-  @keyframes #{$name} {
-    @content;
-  } 
-}
-
-@mixin animation($params){
-  @include experimental(animation, $params);
-}
+$browser-context: 24px; // Default font size
+$base-line-height: 1.231;

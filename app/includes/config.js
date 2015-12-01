@@ -14,13 +14,18 @@ var os = require("os")
 			db_pass :'root',
 			db_host :'127.0.0.1',
 			db_port :'3306',
-			log 	:'log.txt',
+			log 	:'logs/log.txt',
 			timezone:'America/Chicago',
 			validExtensions:/^(m4a|mp3|ogg|oga|webma|wav)$/,
 			verbose:true,
 			googleSearch:'https://www.googleapis.com/customsearch/v1',
 			googleSearchID:'006207592909902448948:athgktuuj48',
 			googleKey:'AIzaSyADyzBtsCIc43FzJNuodK9E_1agCruaamc',
+			validate:false,
+			ngrokToken:'2vXBSOB73hNgxEWOor/X',
+			ngrokSubdomain:'phenomblue-music-server',
+			slackAPIToken:'xoxb-4356217552-Z8J9m0WY1rGvDTVAXqi1j3AY',
+			slackCommandToken:'rQ390l1tyc48Rw9E71P9yJ3W',
 			files:{
 				upload:path.join(path.dirname(require.main.filename),'../uploads'),
 				music:path.join(path.dirname(require.main.filename),'music'),
@@ -49,6 +54,11 @@ var os = require("os")
 			googleSearch:'https://www.googleapis.com/customsearch/v1',
 			googleSearchID:'006207592909902448948:athgktuuj48',
 			googleKey:'AIzaSyADyzBtsCIc43FzJNuodK9E_1agCruaamc',
+			validate:false,
+			ngrokToken:'2vXBSOB73hNgxEWOor/X',
+			ngrokSubdomain:'phenomblue-music-server',
+			slackAPIToken:'xoxb-4356217552-Z8J9m0WY1rGvDTVAXqi1j3AY',
+			slackCommandToken:'rQ390l1tyc48Rw9E71P9yJ3W',
 			files:{
 				upload:'/mnt/sdb1/uploads',
 				music:'/mnt/sdb1/music',
@@ -81,6 +91,7 @@ if(config == null){
 // Some optional command line arguments
 if(argv.q) config.verbose = false;
 if(argv.v) config.verbose = true;
+if(argv.r) config.validate = true;
 if(argv.log) config.log = argv.log;
 
 // Configure our logging

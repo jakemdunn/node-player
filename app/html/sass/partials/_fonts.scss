@@ -1,10 +1,18 @@
+//* Available font families
+//font-family:'DINNextW01-CondensedLig';
+//font-family:'DINNextW01-CondensedMed';
+//font-family:'Memphis LT W01 Light';
+//font-family:'FranklinITCW01-CmThin';
+//font-family:'Franklin ITC W01 Thin';
+//font-family:'MuseoSansW01-Rounded500';
+
 @font-face {
 	font-family: 'player-icons';
-	src:url('fonts/player-icons.eot');
-	src:url('fonts/player-icons.eot?#iefix') format('embedded-opentype'),
-		url('fonts/player-icons.woff') format('woff'),
-		url('fonts/player-icons.ttf') format('truetype'),
-		url('fonts/player-icons.svg#player-icons') format('svg');
+	src:url('../fonts/player-icons.eot');
+	src:url('../fonts/player-icons.eot?#iefix') format('embedded-opentype'),
+		url('../fonts/player-icons.woff') format('woff'),
+		url('../fonts/player-icons.ttf') format('truetype'),
+		url('../fonts/player-icons.svg#player-icons') format('svg');
 	font-weight: normal;
 	font-style: normal;
 }
@@ -13,7 +21,7 @@
 	font-family: 'player-icons';
 }
 
-/* Use the following CSS code if you want to use data attributes for inserting your icons */
+// Use the following CSS code if you want to use data attributes for inserting your icons
 [data-icon]:before {
 	font-family: 'player-icons';
 	content: attr(data-icon);
@@ -23,4 +31,28 @@
 	text-transform: none;
 	line-height: 1;
 	-webkit-font-smoothing: antialiased;
+}
+
+@mixin DinCondensedLight{
+	font-family:'DINNextW01-CondensedLig';
+}
+
+@mixin DinCondensedMedium{
+	font-family:'DINNextW01-CondensedMed';
+}
+
+@mixin MemphisLight{
+	font-family:'Memphis LT W01 Light';
+}
+
+@mixin FranklinCMThin{
+	font-family:'FranklinITCW01-CmThin';
+}
+
+@mixin FranklinThin{
+	font-family:'Franklin ITC W01 Thin';
+}
+
+@mixin MuseoSans{
+	font-family:'MuseoSansW01-Rounded500';
 }

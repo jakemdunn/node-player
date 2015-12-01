@@ -1,4 +1,4 @@
-var player = require('./player.js')
+var Player = require('./player.js')
   , library = require('./library.js')
   , winston = require('winston')
   , util = require('util');
@@ -28,8 +28,11 @@ module.exports.init = function(sessionSockets,users){
 		// Disconnect
 		socket.on('disconnect', function(){
 			users.disconnected(session,socket);
-			player.removeListener('statusUpdate',playerUpdate);
 			users.removeListener('statusUpdate',usersUpdate);
+
+			Player.players().forEach(function(player,index,players){
+				player.removeListener('statusUpdate',playerUpdate);
+			});
 		});
 
 		// Player notifications
@@ -37,7 +40,9 @@ module.exports.init = function(sessionSockets,users){
 			if(! users.loggedIn(session)) return;
 			socket.emit(status,args);
 		}
-		player.on('statusUpdate',playerUpdate);
+		Player.players().forEach(function(player,index,players){
+			player.on('statusUpdate',playerUpdate);
+		});
 
 		// Users notifications
 		var usersUpdate = function(status,args){
@@ -46,47 +51,60 @@ module.exports.init = function(sessionSockets,users){
 		}
 		users.on('statusUpdate',usersUpdate);
 
+		// AIRHORN
+		socket.on('airhorn',function(){
+			if(! users.loggedIn(session)) return;
+			users.airhornRequest(session);
+		});
+
 		// Playlist Interactions
-		socket.on('skipTrack',function(){
+		socket.on('playlistAction',function(data){
 			if(! users.loggedIn(session)) return;
-			player.skipTrack(session.userObject);
+			var player = Player.getPlayer(data.player);
+			player[data.action].apply(player,data.args);
 		});
 
-		socket.on('rateTrack',function(id,rating){
-			if(! users.loggedIn(session)) return;
-			player.rateTrack(session.userObject,id,rating);
-		});
+		// socket.on('skipTrack',function(){
+		// 	if(! users.loggedIn(session)) return;
+		// 	player.skipTrack(session.userObject);
+		// });
 
-		socket.on('insertTracks',function(index,ids){
-			if(! users.loggedIn(session)) return;
-			player.insertTracks(session.userObject,index,ids);
-		});
+		// socket.on('rateTrack',function(id,rating){
+		// 	if(! users.loggedIn(session)) return;
+		// 	player.rateTrack(session.userObject,id,rating);
+		// });
 
-		socket.on('moveTracks',function(index,ids){
-			if(! users.loggedIn(session)) return;
-			player.moveTracks(session.userObject,index,ids);
-		});
+		// socket.on('insertTracks',function(index,ids){
+		// 	if(! users.loggedIn(session)) return;
+		// 	player.insertTracks(session.userObject,index,ids);
+		// });
 
-		socket.on('removeTracks',function(ids){
-			if(! users.loggedIn(session)) return;
-			player.removeTracks(session.userObject,ids);
-		});
+		// socket.on('moveTracks',function(index,ids){
+		// 	if(! users.loggedIn(session)) return;
+		// 	player.moveTracks(session.userObject,index,ids);
+		// });
 
-		socket.on('addChannel',function(name){
-			if(! users.loggedIn(session)) return;
-			player.addChannel(session.userObject,name);
-		});
+		// socket.on('removeTracks',function(ids){
+		// 	if(! users.loggedIn(session)) return;
+		// 	player.removeTracks(session.userObject,ids);
+		// });
 
-		socket.on('setChannel',function(id){
-			if(! users.loggedIn(session)) return;
-			player.setChannel(session.userObject,id);
-		});
+		// socket.on('addChannel',function(name){
+		// 	if(! users.loggedIn(session)) return;
+		// 	player.addChannel(session.userObject,name);
+		// });
 
-		socket.on('deleteSongs',function(ids){
-			if(! users.loggedIn(session)) return;
-			player.deleteSongs(session.userObject,ids);
-		});
+		// socket.on('setChannel',function(id){
+		// 	if(! users.loggedIn(session)) return;
+		// 	player.setChannel(session.userObject,id);
+		// });
 
+		// socket.on('deleteSongs',function(ids){
+		// 	if(! users.loggedIn(session)) return;
+		// 	player.deleteSongs(session.userObject,ids);
+		// });
+
+		// Settings/Logs
 		socket.on('requestSettings',function(){
 			if(! users.loggedIn(session)) return;
 			users.sendUserSettings(socket);

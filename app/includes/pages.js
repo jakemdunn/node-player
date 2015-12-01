@@ -19,9 +19,17 @@ module.exports.init = function(app,users){
 	var basePath = path.dirname(require.main.filename);
 	var oneYear = 31557600;
 
-	// Home Page
-	app.get('/',function(req,res){
-		res.sendfile(basePath + '/html/index.html');
+	// Routing handled by angular should redirect to the index.html
+	fs.readdir(basePath + '/html/views/pages',function(err,files){
+		var pages = [];
+		files.forEach(function(file,index,files) {
+			pages.push(file.replace(/\..*/,''));
+		});
+
+		pages = new RegExp('^/('+pages.join('|')+')');
+		app.get(pages,function(req,res){
+			res.sendfile(basePath + '/html/index.html');
+		});
 	});
 
 	// User entry
@@ -33,27 +41,14 @@ module.exports.init = function(app,users){
 		res.send(200,'Entry tracked');
 	});
 
-	// Bundled js
-	app.get('/js/bundled.js', browserify([
-		'./html/scripts/lib/plupload.full.js',
-		'./html/scripts/lib/jquery.jplayer.min.js',
-		'./html/scripts/plugins.js',
-		'./html/scripts/includes/list.js',
-		'./html/scripts/includes/socket.js',
-		'./html/scripts/includes/status.js',
-		'./html/scripts/includes/view.js',
-		'./html/scripts/includes/upload.js',
-		'./html/scripts/script.js',
-		]));
-
 	// Assets
-	app.get(/^\/(css|images|scripts)\/(.*)$/,function(req,res){
-		res.sendfile(basePath + '/html/' + req.params[0] + '/' + req.params[1]);
-	});
+	// app.get(/^\/(css|images|scripts|pages)\/(.*)$/,function(req,res){
+	// 	res.sendfile(basePath + '/html/' + req.params[0] + '/' + req.params[1]);
+	// });
 
-	app.get('/favicon.ico',function(req,res){
-		res.sendfile(basePath + '/html/favicon.ico');
-	});
+	// app.get('/favicon.ico',function(req,res){
+	// 	res.sendfile(basePath + '/html/favicon.ico');
+	// });
 
 	// Streaming Files
 	app.get(/^\/(entry|music)\/(.+)$/,function(req,res){
@@ -175,31 +170,43 @@ module.exports.init = function(app,users){
 			}else{
 				files = fs.readdirSync(dir);
 				if(files.length > 0){
-					var filename = path.resolve(dir,files[0]);
+					var filename = path.resolve(dir,files[0]),
+						song;
 
-					api.getImageData(filename,function(data,mimeType){
-						if(data){
-							data = new Buffer(data, 'base64').toString('binary');
-							res.writeHead(200, {'Content-Type': mimeType});
-							res.end(data,'binary');
-
-							// Save to folder for caching 
-							var extension = mime.extension(mimeType),
-								newImage = path.resolve(dir,'cover.'+extension);
-
-							fs.writeFile(newImage,data, 'binary',function(error){
-								if(error)
-									winston.error('Error storing ID3 cover image ['+util.inspect(error)+']');
-								else
-									createThumb(dir,newImage);
-							});
-						}else{
+					library.getSong(filename)
+						.then(function(loaded){
+							song = loaded;
+							return song.getID3();
+						})
+						.then(function(){
+							//TODO: See if it's embedded in the ID3
 							res.sendfile(basePath + '/html/images/missing-album.jpg');
-
 							// Search for our image on google
-							findCover(dir,filename);
-						}
-					});
+							findCover(dir,song);
+						})
+						.catch(function(error){
+							error.outputToLog();
+						});
+
+					// api.getImageData(filename,function(data,mimeType){
+					// 	if(data){
+					// 		data = new Buffer(data, 'base64').toString('binary');
+					// 		res.writeHead(200, {'Content-Type': mimeType});
+					// 		res.end(data,'binary');
+
+					// 		// Save to folder for caching 
+					// 		var extension = mime.extension(mimeType),
+					// 			newImage = path.resolve(dir,'cover.'+extension);
+
+					// 		fs.writeFile(newImage,data, 'binary',function(error){
+					// 			if(error)
+					// 				winston.error('Error storing ID3 cover image ['+util.inspect(error)+']');
+					// 			else
+					// 				createThumb(dir,newImage);
+					// 		});
+					// 	}else{
+					// 	}
+					// });
 
 				}else{
 					send404(res);
@@ -227,49 +234,43 @@ module.exports.init = function(app,users){
 	}
 
 	var searched = [];
-	var findCover = function(dir,filename)
+	var findCover = function(dir,song)
 	{
 		if(searched.indexOf(dir) != -1) return;
 		searched.push(dir);
 
-		api.getID3(filename,function(id3){
-			if(id3 == null || id3.comments == null || id3.comments.artist == null || id3.comments.album == null) return;
+		var query = [];
 
-			var artist = id3.comments.artist[0]
-			  , album = id3.comments.album[0]
-			  , query = [];
+		query.push('q=' + encodeURIComponent(song.artist + ' ' + song.album + ' album artwork'));
+		query.push('imgSize=large');
+		query.push('num=1');
+		query.push('safe=medium');
+		query.push('searchType=image');
+		query.push('key='+config.googleKey);
+		query.push('cx='+config.googleSearchID);
 
-			query.push('q=' + encodeURIComponent(artist + ' ' + album + ' album artwork'));
-			query.push('imgSize=large');
-			query.push('num=1');
-			query.push('safe=medium');
-			query.push('searchType=image');
-			query.push('key='+config.googleKey);
-			query.push('cx='+config.googleSearchID);
+		var url = config.googleSearch + '?' + query.join('&');
 
-			var url = config.googleSearch + '?' + query.join('&');
+		winston.info('Finding image with query [' + url + ']');
 
-			winston.info('Finding image with query [' + url + ']');
+		request(url,function(error,response,body){
+			if(error || response.statusCode != 200){
+				winston.error('Issues getting ['+url+'] returned status code of ['+response.statusCode+']');
+				winston.error(util.inspect(error));
+				winston.error(util.inspect(body));
+				return;
+			}
+			var json = JSON.parse(body);
 
-			request(url,function(error,response,body){
-				if(error || response.statusCode != 200){
-					winston.error('Issues getting ['+url+'] returned status code of ['+response.statusCode+']');
-					winston.error(util.inspect(error));
-					winston.error(util.inspect(body));
-					return;
-				}
-				var json = JSON.parse(body);
+			if(json.items && json.items.length > 0){
+				var url = json.items[0].link
+				  , mimeType = json.items[0].mime
 
-				if(json.items && json.items.length > 0){
-					var url = json.items[0].link
-					  , mimeType = json.items[0].mime
-
-					downloadCover(url,mimeType,dir);
-				}else{
-					winston.info('Unable to find cover in google search:');
-					winston.info(util.inspect(json));
-				}
-			});
+				downloadCover(url,mimeType,dir);
+			}else{
+				winston.info('Unable to find cover in google search:');
+				winston.info(util.inspect(json));
+			}
 		});
 	}
 

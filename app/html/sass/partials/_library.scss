@@ -1,0 +1,174 @@
+.library{
+	margin:0;
+	padding:0;
+
+	ul{
+		margin:0;
+		padding:0;
+		list-style:none;
+	}
+
+	li{
+		display:inline;
+		margin:0;
+		padding:0;
+	}
+
+	.album-content{
+		float:left;
+		width:percentage(1/11);
+		position:relative;
+		overflow:hidden;
+		margin:0;
+		padding:0;
+		background:$green;
+		cursor:pointer;
+		perspective: 600px;
+
+		@for $columns from 1 through 10{
+			@media (max-width:$columns * 200px){
+				width:percentage(1/$columns);
+			}
+		}
+
+		img{
+			transition:all 0.2s ease-in-out;
+			width:100%;
+			height:auto;
+			display:block;
+		}
+
+		.meta{
+			position:absolute;
+			top:0%;
+			left:0%;
+			height:100%;
+			width:100%;
+			box-sizing:border-box;
+			padding:10px;
+			transition:all 0.2s ease-in-out;
+			opacity:0;
+			text-align:center;
+			transform:translateZ(200px);
+
+			.centered{
+				position:relative;
+				display:inline-block;
+				vertical-align:middle;
+				width:90%;
+			}
+
+			&:before{
+				background:url(/images/texture-abstract.png) 50% 0%;
+				content:" ";
+				position:absolute;
+				top:0;
+				left:0;
+				width:100%;
+				height:100%;
+				opacity:0.6;
+			}
+
+			&:after{
+				content:" ";
+				display:inline-block;
+				vertical-align:middle;
+				width:1px;
+				height:100%;
+			}
+		}
+
+		h3{
+			@include DinCondensedLight;
+			font-size:34px;
+			margin:0 0 3px;
+		}
+
+		h4{
+			@include DinCondensedLight;
+			padding:0;
+			margin:0;
+			font-size:20px;
+		}
+
+		&:hover{
+			img{
+				transform:translateZ(-200px);
+				opacity:0.5;
+			}
+			.meta{
+				opacity:0.9;
+				transform:translateZ(0px);
+			}
+		}
+	}
+
+	.expanded-album{
+		display: block;
+		clear: both;
+		overflow:hidden;
+		position:relative;
+		perspective: 600px;
+		padding:5px 0;
+
+		li{
+			padding:5px 100px 5px 10px;
+			display:block;
+			font-size:em(14px);
+			line-height:1;
+			position:relative;
+
+			.stars{
+				position:absolute;
+				right:10px;
+				top:5px;
+			}
+		}
+
+		p{
+			margin:0;
+		}
+	}
+}
+
+
+.stars{
+	@include icon-font;
+	display:inline-block;
+	color:darken($light-grey,40%);
+	color:rgba(255,255,255,.2);
+
+	.star{
+
+		.content{
+			float:left;
+			position:relative;
+			cursor:pointer;
+			padding:0 2px 0 0;
+
+			&:before{
+				position:absolute;
+				left:0;
+				top:0;
+			}
+		}
+
+		&:hover > .content:before{
+			content:"";
+			color:$light-grey;
+			color:rgba(255,255,255,.9) !important;
+		}
+	}
+		
+	@for $rating from 0 through 5 {
+		&.rated-#{$rating}{
+			@for $star from 0 through $rating {
+				.star-#{$star}>.content:before{
+					color:darken($light-grey,20%);
+					color:rgba(255,255,255,.5);
+					content:"";
+				}
+			}
+		}
+	}
+}

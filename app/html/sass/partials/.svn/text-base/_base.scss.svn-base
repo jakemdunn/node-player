@@ -1,0 +1,22 @@
+// This file must be imported before loading html5-boilerplate
+
+// base
+$base-font-family: unquote("MuseoSansW01-Rounded500"), unquote("sans-serif");
+$base-font-size: 13px;
+$base-line-height: 1.231;
+$font-color: #222;
+$green: #0dc76f;
+$red: #E5012D;
+$blue: #519ADF;
+
+// Links
+$link-color: #E5012D;
+$link-visited-color: #E5012D;
+$link-hover-color: darken($link-color,10%);
+
+// Lists
+$list-left-margin: 40px;
+
+// Selected
+$selected-background-color: #000;
+$selected-font-color: #FFF;
