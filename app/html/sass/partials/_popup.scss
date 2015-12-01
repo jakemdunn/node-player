@@ -1,0 +1,71 @@
+.ui-widget-overlay{
+	@include opacity(0.7);
+	position:fixed;
+	top:0;
+	left:0;
+	background:url(../images/texture-lines.png) repeat $dark-grey;
+}
+
+.ui-dialog{
+	background:$light-grey;
+
+	.ui-dialog-title{
+		display:block;
+		background:url(../images/texture-lines.png) repeat $green;
+		color:$light-grey;
+		font-size:20px;
+		padding:5px;
+	}
+
+	.ui-dialog-titlebar-close{
+		text-decoration:none;
+		position:absolute;
+		top:5px;
+		right:5px;
+		color:$light-grey;
+		padding:5px;
+
+		&:hover{
+			color:$red;
+		}
+		&:before{
+			@include icon-font;
+			content:"";
+		}
+
+		span{
+			display:none;
+		}
+	}
+
+	.ui-dialog-content{
+		background:darken($light-grey,5%);
+		margin:10px;
+		color:$dark-grey;
+		padding:15px 5px;
+		text-align:center;
+
+		p{
+			margin:0;
+		}
+	}
+
+	.ui-dialog-buttonpane{
+		padding:5px;
+		text-align:right;
+		button{
+			@include box-sizing(border-box);
+			border:none;
+			background:$blue;
+			padding:5px 5px 2px;
+			margin:0 0 0 5px;
+			text-transform:uppercase;
+			color:$light-grey;
+
+			&:focus, &:hover, &:active{
+				background:darken($blue,10%);
+				outline:none;
+			}
+		}
+	}
+}
